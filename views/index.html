@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Incident PDF → Excel Converter</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700;1,9..40,400&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #faf9f7;
+            --surface: #ffffff;
+            --text: #1c1917;
+            --text-muted: #57534e;
+            --accent: #0d9488;
+            --accent-hover: #0f766e;
+            --accent-soft: rgba(13, 148, 136, 0.12);
+            --border: #e7e5e4;
+            --error-bg: #fef2f2;
+            --error-text: #b91c1c;
+            --warning-bg: #fffbeb;
+            --warning-text: #b45309;
+            --info-bg: #f0fdfa;
+            --info-text: #0f766e;
+            --shadow-sm: 0 1px 2px rgba(28, 25, 23, 0.04);
+            --shadow: 0 4px 6px -1px rgba(28, 25, 23, 0.06), 0 2px 4px -2px rgba(28, 25, 23, 0.04);
+            --shadow-lg: 0 10px 15px -3px rgba(28, 25, 23, 0.06), 0 4px 6px -4px rgba(28, 25, 23, 0.04);
+            --radius: 12px;
+            --radius-lg: 16px;
+        }
+
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #1c1917;
+                --surface: #292524;
+                --text: #fafaf9;
+                --text-muted: #a8a29e;
+                --accent: #2dd4bf;
+                --accent-hover: #5eead4;
+                --accent-soft: rgba(45, 212, 191, 0.15);
+                --border: #44403c;
+                --error-bg: #450a0a;
+                --error-text: #fca5a5;
+                --warning-bg: #422006;
+                --warning-text: #fcd34d;
+                --info-bg: #134e4a;
+                --info-text: #99f6e4;
+                --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.2);
+                --shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.2), 0 2px 4px -2px rgba(0, 0, 0, 0.15);
+                --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.25), 0 4px 6px -4px rgba(0, 0, 0, 0.2);
+            }
+        }
+
+        * { box-sizing: border-box; }
+        body { margin: 0; min-height: 100vh; font-family: "DM Sans", system-ui, -apple-system, sans-serif; background: var(--bg); color: var(--text); line-height: 1.6; }
+        .page { max-width: 640px; margin: 0 auto; padding: 3rem 1.5rem 4rem; }
+        .header { text-align: center; margin-bottom: 2.5rem; }
+        .header-icon { width: 56px; height: 56px; margin: 0 auto 1rem; border-radius: var(--radius); background: var(--accent-soft); color: var(--accent); display: flex; align-items: center; justify-content: center; font-size: 1.75rem; }
+        .header h1 { margin: 0 0 0.5rem; font-size: 1.75rem; font-weight: 700; letter-spacing: -0.02em; }
+        .header p { margin: 0; color: var(--text-muted); font-size: 1rem; }
+        .messages { list-style: none; padding: 0; margin: 0 0 1.5rem; }
+        .messages li { padding: 0.75rem 1rem; border-radius: var(--radius); margin-bottom: 0.5rem; font-size: 0.9375rem; }
+        .messages li.error { background: var(--error-bg); color: var(--error-text); }
+        .messages li.warning { background: var(--warning-bg); color: var(--warning-text); }
+        .messages li.info { background: var(--info-bg); color: var(--info-text); }
+        .upload-card { background: var(--surface); border-radius: var(--radius-lg); padding: 1.75rem; box-shadow: var(--shadow); border: 1px solid var(--border); }
+        .upload-form label { display: block; font-weight: 600; font-size: 0.9375rem; margin-bottom: 0.5rem; }
+        .file-wrap { position: relative; margin-bottom: 1.25rem; }
+        .file-wrap input[type="file"] { width: 100%; padding: 1rem; font-size: 0.9375rem; border: 2px dashed var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); cursor: pointer; transition: border-color 0.2s, background 0.2s; }
+        .file-wrap input[type="file"]:hover { border-color: var(--accent); background: var(--accent-soft); }
+        .file-wrap input[type="file"]::file-selector-button { padding: 0.5rem 1rem; margin-right: 1rem; border: none; border-radius: 8px; background: var(--accent); color: white; font-weight: 600; font-size: 0.875rem; cursor: pointer; font-family: inherit; }
+        .file-wrap input[type="file"]::file-selector-button:hover { background: var(--accent-hover); }
+        .btn { display: inline-flex; align-items: center; justify-content: center; gap: 0.5rem; border: none; border-radius: 10px; padding: 0.75rem 1.5rem; font-size: 1rem; font-weight: 600; font-family: inherit; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; text-decoration: none; }
+        .btn-primary { background: var(--accent); color: white; box-shadow: var(--shadow-sm); }
+        .btn-primary:hover { background: var(--accent-hover); transform: translateY(-1px); box-shadow: var(--shadow); }
+        .btn-primary:active { transform: translateY(0); }
+        .results-card { margin-top: 2rem; background: var(--surface); border-radius: var(--radius-lg); padding: 1.75rem; box-shadow: var(--shadow); border: 1px solid var(--border); }
+        .results-card h2 { margin: 0 0 1rem; font-size: 1.125rem; font-weight: 600; }
+        .file-list { list-style: none; padding: 0; margin: 0; }
+        .file-list li { display: flex; align-items: center; justify-content: space-between; gap: 1rem; padding: 0.875rem 0; border-bottom: 1px solid var(--border); }
+        .file-list li:last-child { border-bottom: none; }
+        .file-list .name { font-size: 0.9375rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .file-actions a { flex-shrink: 0; padding: 0.5rem 1rem; border-radius: 8px; background: var(--accent-soft); color: var(--accent); text-decoration: none; font-weight: 600; font-size: 0.875rem; transition: background 0.2s, color 0.2s; }
+        .file-actions a:hover { background: var(--accent); color: white; }
+        .zip-row { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--border); }
+        .zip-btn { display: inline-flex; align-items: center; gap: 0.5rem; padding: 0.75rem 1.25rem; border-radius: 10px; background: var(--text); color: var(--bg); text-decoration: none; font-weight: 600; font-size: 0.9375rem; transition: transform 0.15s, opacity 0.15s; }
+        .zip-btn:hover { opacity: 0.9; transform: translateY(-1px); }
+    </style>
+</head>
+<body>
+    <main class="page">
+        <header class="header">
+            <div class="header-icon" aria-hidden="true">📄</div>
+            <h1>Incident PDF → Excel Converter</h1>
+            <p>Upload one or more PDF exports to get downloadable Excel spreadsheets.</p>
+        </header>
+
+        {{MESSAGES}}
+
+        <div class="upload-card">
+            <form class="upload-form" method="post" enctype="multipart/form-data">
+                <label for="pdfs">Select PDF files</label>
+                <div class="file-wrap">
+                    <input id="pdfs" type="file" name="pdfs" accept=".pdf,application/pdf" multiple required>
+                </div>
+                <button type="submit" class="btn btn-primary">Convert to Excel</button>
+            </form>
+        </div>
+
+        {{RESULTS}}
+    </main>
+</body>
+</html>
