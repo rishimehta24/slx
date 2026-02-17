@@ -260,6 +260,32 @@ function splitNameId(line: string): [string, string] {
   return [name, residentId];
 }
 
+/** Rest of line after ") " or ")" (e.g. "12/22/20232/3/26 7:15AMResident's RoomWest 216-3"). */
+function getRestAfterParen(line: string): string {
+  const paren = line.indexOf(")");
+  if (paren === -1) return line.trim();
+  return line.slice(paren + 1).trim();
+}
+
+/**
+ * Parse when admission, incident date/time, location and room are on the same line as name (id).
+ * Format: Name (ID)AdmissionDateIncidentDateTime LocationRoom (e.g. West 216-3). No space between dates.
+ */
+function parseInlineResidentLine(rest: string): { admission: string; incident: string; location: string; room: string } | null {
+  const firstDateMatch = rest.match(/^(\d{1,2}\/\d{1,2}\/\d{2,4})/);
+  if (!firstDateMatch) return null;
+  const admission = firstDateMatch[1].trim();
+  const afterFirst = rest.slice(firstDateMatch[0].length);
+  const secondMatch = afterFirst.match(/^(\d{1,2}\/\d{1,2}\/\d{2,4}\s*\d{1,2}:\d{2}\s*(?:AM|PM))/i);
+  if (!secondMatch) return null;
+  const incident = secondMatch[1].trim();
+  const afterIncident = afterFirst.slice(secondMatch[0].length).trim();
+  const westMatch = afterIncident.match(/\s+(West\s+[\d\-]+)\s*$/i);
+  const room = westMatch ? westMatch[1].trim() : "";
+  const location = westMatch ? afterIncident.slice(0, westMatch.index).trim() : afterIncident.trim();
+  return { admission, incident, location, room };
+}
+
 function nextNonempty(lines: string[], idx: number): [string, number] {
   while (idx < lines.length) {
     const candidate = lines[idx].trim();
@@ -413,32 +439,49 @@ function parseFactors(
     if (stripped.startsWith("Date:") || stripped.startsWith("Time:") || stripped.startsWith("User:")) break;
     if (stripped.startsWith("Page #") || stripped.startsWith("Fall Incidents")) continue;
     if (stripped.startsWith("Resident Name") || stripped.startsWith("Admission Date")) continue;
-    if (isEntryStart(stripped)) break;
+    if (isEntryStart(stripped)) {
+      idx--; // next entry line: leave idx so caller will reprocess this line
+      break;
+    }
     if (lowered.includes("predisposing environmental")) {
       current = "environmental";
+      addFactorsFromLine(stripped, current, mapping[current], factors);
       continue;
     }
     if (lowered.includes("predisposing physiological")) {
       current = "physiological";
+      addFactorsFromLine(stripped, current, mapping[current], factors);
       continue;
     }
     if (lowered.includes("predisposing situation")) {
       current = "situational";
+      addFactorsFromLine(stripped, current, mapping[current], factors);
       continue;
     }
     if (stripped === "Notes") continue;
     if (current) {
-      const map = mapping[current];
-      for (const chunk of stripped.split(",")) {
-        const cleaned = chunk.trim();
-        if (!cleaned) continue;
-        const key = normalizeKey(cleaned);
-        const entry = map.get(key);
-        if (entry) factors[current!].add(entry[1]);
-      }
+      addFactorsFromLine(stripped, current, mapping[current], factors);
     }
   }
   return [factors, idx];
+}
+
+function addFactorsFromLine(
+  line: string,
+  current: FactorKey,
+  map: Map<string, [number, string]>,
+  factors: { environmental: Set<string>; physiological: Set<string>; situational: Set<string> }
+): void {
+  const colonIdx = line.indexOf(":");
+  const valuePart = colonIdx >= 0 ? line.slice(colonIdx + 1).trim() : line.trim();
+  if (!valuePart) return;
+  for (const chunk of valuePart.split(",")) {
+    const cleaned = chunk.trim();
+    if (!cleaned) continue;
+    const key = normalizeKey(cleaned);
+    const entry = map.get(key);
+    if (entry) factors[current].add(entry[1]);
+  }
 }
 
 function parseEntries(lines: string[]): IncidentEntry[] {
@@ -451,14 +494,37 @@ function parseEntries(lines: string[]): IncidentEntry[] {
       continue;
     }
     const [name, residentId] = splitNameId(stripped);
-    idx++;
-    let admissionLine: string;
-    [admissionLine, idx] = nextNonempty(lines, idx);
-    let admission: string, incident: string;
-    [admission, incident, idx] = splitAdmissionIncident(admissionLine, lines, idx);
-    let preSection: string[];
-    [preSection, idx] = collectUntilToken(lines, idx, "Nursing Description");
-    const [immediateText, location, witnessed, room, sentToHospital, injuries] = parsePreSection(preSection);
+    const rest = getRestAfterParen(stripped);
+    const inline = parseInlineResidentLine(rest);
+
+    let admission: string;
+    let incident: string;
+    let location: string;
+    let room: string;
+    let immediateText: string;
+    let witnessed: string;
+    let sentToHospital: string;
+    let injuries: string[];
+
+    if (inline) {
+      admission = inline.admission;
+      incident = inline.incident;
+      location = inline.location;
+      room = inline.room;
+      idx++;
+      const [preSection, idxAfterPre] = collectUntilToken(lines, idx, "Nursing Description");
+      idx = idxAfterPre;
+      [immediateText, , witnessed, , sentToHospital, injuries] = parsePreSection(preSection);
+    } else {
+      idx++;
+      let admissionLine: string;
+      [admissionLine, idx] = nextNonempty(lines, idx);
+      [admission, incident, idx] = splitAdmissionIncident(admissionLine, lines, idx);
+      let preSection: string[];
+      [preSection, idx] = collectUntilToken(lines, idx, "Nursing Description");
+      [immediateText, location, witnessed, room, sentToHospital, injuries] = parsePreSection(preSection);
+    }
+
     let nursingLines: string[];
     [nursingLines, idx] = collectUntilToken(lines, idx, "Notes");
     const nursingDescription = nursingLines.join(" ").trim();
@@ -490,6 +556,9 @@ function parseEntries(lines: string[]): IncidentEntry[] {
     const db = b.incident_datetime_sort?.getTime() ?? 0;
     if (db !== da) return db - da;
     return b.resident_name.localeCompare(a.resident_name);
+  });
+  entries.forEach((e, i) => {
+    e.incident_number = String(i + 1);
   });
   return entries;
 }
