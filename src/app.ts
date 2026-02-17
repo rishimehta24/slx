@@ -152,7 +152,7 @@ app.post("/", (req: Request, res: Response, next: express.NextFunction) => {
       }
       const pdfPath = path.join(tmpDir, originalName);
       fs.writeFileSync(pdfPath, file.buffer);
-      const outputName = uniqueOutputName(path.basename(originalName, path.extname(originalName)) + ".xlsx", usedNames);
+      const outputName = uniqueOutputName(path.basename(originalName, path.extname(originalName)) + ".xls", usedNames);
       const outputPath = path.join(tmpDir, outputName);
       try {
         await convert(pdfPath, outputPath);
@@ -193,7 +193,7 @@ app.get("/download/:jobId/:fileIndex", (req: Request, res: Response) => {
     return res.status(404).send("Not found");
   }
   const file = job.files[fileIndex];
-  res.attachment(file.filename).type("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet").send(file.content);
+  res.attachment(file.filename).type("application/vnd.ms-excel").send(file.content);
 });
 
 app.get("/download/:jobId/zip", (req: Request, res: Response) => {

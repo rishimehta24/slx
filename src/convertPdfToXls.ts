@@ -1,10 +1,11 @@
 /**
- * Convert incident analysis PDF into an Excel (.xlsx) workbook.
+ * Convert incident analysis PDF into an Excel (.xls) workbook.
  * Ported from Python convert_pdf_to_xls.py
  */
 import ExcelJS from "exceljs";
 import fs from "fs";
 import path from "path";
+import * as XLSX from "xlsx";
 
 // pdf-parse is CommonJS
 const pdfParse = require("pdf-parse") as (buffer: Buffer) => Promise<{ text: string }>;
@@ -745,5 +746,8 @@ export async function convert(pdfPath: string, outputPath: string): Promise<void
   applyColumnWidths(sheet);
   writeMetadataRows(sheet, meta);
   writeEntries(sheet, entries);
-  await workbook.xlsx.writeFile(outputPath);
+  const xlsxBuffer = await workbook.xlsx.writeBuffer();
+  const wb = XLSX.read(xlsxBuffer, { type: "buffer" });
+  const xlsBuffer = XLSX.write(wb, { bookType: "xls", type: "buffer" });
+  fs.writeFileSync(outputPath, xlsBuffer);
 }

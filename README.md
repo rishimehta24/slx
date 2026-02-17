@@ -1,6 +1,6 @@
 # Incident PDF → Excel Converter
 
-Convert incident analysis PDF reports into formatted Excel (XLSX) spreadsheets. Upload one or more PDFs via the web UI and download individual files or a ZIP of all converted reports.
+Convert incident analysis PDF reports into formatted Excel (XLS) spreadsheets. Upload one or more PDFs via the web UI and download individual files or a ZIP of all converted reports.
 
 ## Requirements
 
@@ -33,7 +33,7 @@ By default the server listens on **http://localhost:5000**. Set the `PORT` envir
 1. Open the app in your browser.
 2. Select one or more incident PDF files (`.pdf`).
 3. Click **Convert to Excel**.
-4. Download individual XLSX files or **Download all as ZIP**.
+4. Download individual XLS files or **Download all as ZIP**.
 
 ## Deploy
 
@@ -46,7 +46,7 @@ Set `PORT` in the environment; the app binds to `0.0.0.0`.
 
 - **Express** – web server and upload handling  
 - **pdf-parse** – PDF text extraction  
-- **ExcelJS** – XLSX generation  
+- **ExcelJS** + **SheetJS (xlsx)** – XLS generation  
 - **TypeScript** – implementation
 
 ## License
