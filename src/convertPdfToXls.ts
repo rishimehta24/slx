@@ -14,6 +14,21 @@ const DATE_RE = /\d{1,2}\/\d{1,2}\/\d{2,4}/g;
 const REPORT_TITLE = "Incident By Incident Type";
 const SHEET_NAME = "incident_analysis_report";
 
+/** Use when conversion must fail with a precise, actionable message (file, sheet, row, missing fields). */
+export class ConversionError extends Error {
+  constructor(
+    message: string,
+    public readonly fileName: string,
+    public readonly sheetName: string = SHEET_NAME,
+    public readonly rowNumbers?: number[],
+    public readonly missingFields?: string[],
+    public readonly looksLikeMergedColumns?: boolean
+  ) {
+    super(message);
+    this.name = "ConversionError";
+  }
+}
+
 const DEFAULT_COL_WIDTH = 18;
 const COLUMN_WIDTHS: Record<number, number> = {
   0: 22,
@@ -269,6 +284,19 @@ function getRestAfterParen(line: string): string {
 }
 
 /**
+ * If location contains a trailing room token (e.g. "Common BathroomWest 229-1"), split into
+ * location and room so XLS columns align with WORKING format. No space between location and room in PDF is common.
+ */
+function splitLocationAndRoom(location: string, room: string): { location: string; room: string } {
+  if (room || !location) return { location, room };
+  const m = location.match(/^(.+?)((?:East|West)\s+[\d\-]+)\s*$/i);
+  if (m) {
+    return { location: m[1].trim(), room: m[2].trim() };
+  }
+  return { location, room };
+}
+
+/**
  * Parse when admission, incident date/time, location and room are on the same line as name (id).
  * Format: Name (ID)AdmissionDateIncidentDateTime LocationRoom (e.g. West 216-3). No space between dates.
  */
@@ -281,9 +309,9 @@ function parseInlineResidentLine(rest: string): { admission: string; incident: s
   if (!secondMatch) return null;
   const incident = secondMatch[1].trim();
   const afterIncident = afterFirst.slice(secondMatch[0].length).trim();
-  const westMatch = afterIncident.match(/\s+(West\s+[\d\-]+)\s*$/i);
-  const room = westMatch ? westMatch[1].trim() : "";
-  const location = westMatch ? afterIncident.slice(0, westMatch.index).trim() : afterIncident.trim();
+  const roomMatch = afterIncident.match(/\s+((?:East|West)\s+[\d\-]+)\s*$/i);
+  const room = roomMatch ? roomMatch[1].trim() : "";
+  const location = roomMatch ? afterIncident.slice(0, roomMatch.index).trim() : afterIncident.trim();
   return { admission, incident, location, room };
 }
 
@@ -350,14 +378,24 @@ function formatDate(d: Date): string {
   const m = d.getMonth() + 1;
   const day = d.getDate();
   const y = d.getFullYear();
-  return `${m}/${day}/${y}`;
+  return `${String(m).padStart(2, "0")}/${String(day).padStart(2, "0")}/${y}`;
+}
+
+/** Canonical 24h format for XLS output: MM/DD/YYYY HH:MM (e.g. 02/15/2026 15:15). */
+function formatDatetime24h(d: Date): string {
+  const m = d.getMonth() + 1;
+  const day = d.getDate();
+  const y = d.getFullYear();
+  const h = d.getHours();
+  const min = d.getMinutes();
+  return `${String(m).padStart(2, "0")}/${String(day).padStart(2, "0")}/${y} ${String(h).padStart(2, "0")}:${String(min).padStart(2, "0")}`;
 }
 
 function normalizeDatetimeValue(value: string): [string, Date | null] {
   value = value.trim().replace(/ET/g, "").trim();
   if (!value) return ["", null];
   const patterns = [
-    /(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})(AM|PM)/i,
+    /(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})\s*(AM|PM)/i,
     /(\d{1,2})\/(\d{1,2})\/(\d{2,4})\s+(\d{1,2}):(\d{2})/,
   ];
   for (const re of patterns) {
@@ -373,8 +411,7 @@ function normalizeDatetimeValue(value: string): [string, Date | null] {
       if (m[6]?.toUpperCase() === "AM" && hour === 12) hour = 0;
       const dt = new Date(year, month - 1, day, hour, min);
       if (!isNaN(dt.getTime())) {
-        const str = `${month}/${day}/${year} ${hour > 12 ? hour - 12 : hour === 0 ? 12 : hour}:${min.toString().padStart(2, "0")}${hour >= 12 ? "PM" : "AM"}`;
-        return [str, dt];
+        return [formatDatetime24h(dt), dt];
       }
     }
   }
@@ -526,6 +563,10 @@ function parseEntries(lines: string[]): IncidentEntry[] {
       [immediateText, location, witnessed, room, sentToHospital, injuries] = parsePreSection(preSection);
     }
 
+    const split = splitLocationAndRoom(location, room);
+    location = split.location;
+    room = split.room;
+
     let nursingLines: string[];
     [nursingLines, idx] = collectUntilToken(lines, idx, "Notes");
     const nursingDescription = nursingLines.join(" ").trim();
@@ -637,7 +678,7 @@ function writeMetadataRows(sheet: ExcelJS.Worksheet, meta: ReportMetadata): void
   sheet.getCell(1, 1).value = `Date:  ${meta.date_value}`;
   Object.assign(sheet.getCell(1, 1).style, metadataStyle);
   sheet.mergeCells(1, 10, 1, 20);
-  sheet.getCell(1, 10).value = meta.facility || "";
+  sheet.getCell(1, 10).value = meta.facility || "Unknown";
   Object.assign(sheet.getCell(1, 10).style, metadataStyle);
   sheet.mergeCells(1, 21, 1, 32);
   sheet.getCell(1, 21).value = "Facility #: ";
@@ -705,7 +746,10 @@ function writeEntries(sheet: ExcelJS.Worksheet, entries: IncidentEntry[]): void 
     writeWithMerge(sheet, row, 2, entry.resident_name, dataStyle);
     writeWithMerge(sheet, row, 3, entry.resident_id, dataStyle);
     writeWithMerge(sheet, row, 4, entry.admission, dataStyle);
-    writeWithMerge(sheet, row, 5, entry.incident_datetime, dataStyle);
+    const incidentDtStr = entry.incident_datetime_sort
+      ? formatDatetime24h(entry.incident_datetime_sort)
+      : entry.incident_datetime;
+    writeWithMerge(sheet, row, 5, incidentDtStr, dataStyle);
     writeWithMerge(sheet, row, 6, entry.location, dataStyle);
     writeWithMerge(sheet, row, 7, entry.incident_status, dataStyle);
     writeWithMerge(sheet, row, 8, entry.witnessed, dataStyle);
@@ -738,9 +782,33 @@ function writeEntries(sheet: ExcelJS.Worksheet, entries: IncidentEntry[]): void 
 }
 
 export async function convert(pdfPath: string, outputPath: string): Promise<void> {
+  const fileName = path.basename(pdfPath);
   const lines = await readLines(pdfPath);
   const meta = parseMetadata(lines);
   const entries = parseEntries(lines);
+
+  if (entries.length > 0) {
+    const firstRows = entries.slice(0, 5);
+    const rowsMissingDatetime: number[] = [];
+    let looksLikeMerged = false;
+    for (let i = 0; i < firstRows.length; i++) {
+      const e = firstRows[i];
+      if (!e.incident_datetime && !e.incident_datetime_sort) rowsMissingDatetime.push(9 + i);
+      if (!e.incident_status && e.location?.match(/(?:East|West)\s+[\d\-]+/i)) looksLikeMerged = true;
+    }
+    if (rowsMissingDatetime.length === firstRows.length) {
+      throw new ConversionError(
+        `Missing incident date/time in data rows (sheet row numbers: ${rowsMissingDatetime.join(", ")}). ` +
+          (looksLikeMerged ? "Data may match HTML export / merged columns pattern." : "Check PDF has parseable dates."),
+        fileName,
+        SHEET_NAME,
+        rowsMissingDatetime,
+        ["Incident Date/Time"],
+        looksLikeMerged
+      );
+    }
+  }
+
   const workbook = new ExcelJS.Workbook();
   const sheet = workbook.addWorksheet(SHEET_NAME, { views: [{ state: "frozen", ySplit: 8, xSplit: 0 }] });
   applyColumnWidths(sheet);
